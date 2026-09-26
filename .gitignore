@@ -1,4 +1,6 @@
 node_modules/
+.pnp/
+.pnp.js
 .next/
 .vercel/
 .expo/
@@ -12,8 +14,10 @@ out/
 !.env.*.example
 
 *.log
+*.pem
 *.tsbuildinfo
 .DS_Store
+next-env.d.ts
 
 apps/web/tmp_patch.txt
 apps/web/tmp-db-check.js
