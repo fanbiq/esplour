@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
   // Enable it to allow cache directives while ensuring route files do not
   // export conflicting `dynamic` configurations.
   cacheComponents: true,
-  output: "standalone",
+  output: process.env.VERCEL === "1" ? undefined : "standalone",
   assetPrefix: BASE_PATH || undefined,
   experimental: {
     proxyClientMaxBodySize: '100mb',
