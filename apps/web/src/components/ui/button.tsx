@@ -46,7 +46,9 @@ function Button({
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
-  const Comp = asChild ? Slot : "button"
+  const Comp = asChild
+    ? (Slot as unknown as React.ComponentType<React.ComponentProps<"button">>)
+    : "button"
 
   return (
     <Comp

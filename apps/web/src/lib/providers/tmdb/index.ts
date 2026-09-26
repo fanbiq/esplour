@@ -314,9 +314,10 @@ export class TmdbProvider implements MediaProvider {
       responseType: "arraybuffer",
       params: options
     });
+    const contentType = res.headers["content-type"];
     return {
       data: res.data,
-      contentType: res.headers["content-type"] || "image/webp"
+      contentType: typeof contentType === "string" ? contentType : "image/webp"
     };
   }
 

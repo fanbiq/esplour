@@ -39,10 +39,13 @@ export function useUpdateSession() {
       const previousSession = queryClient.getQueryData<SessionStatus | null>(QUERY_KEYS.session);
 
       if (previousSession) {
-        queryClient.setQueryData<SessionStatus | null>(QUERY_KEYS.session, {
-          ...previousSession,
-          filters: payload.filters !== undefined ? payload.filters : previousSession.filters,
-          settings: payload.settings !== undefined ? payload.settings : previousSession.settings,
+        queryClient.setQueryData<SessionStatus | null>(QUERY_KEYS.session, (currentSession) => {
+          if (!currentSession) return currentSession;
+          return {
+            ...currentSession,
+            filters: payload.filters !== undefined ? payload.filters : currentSession.filters,
+            settings: payload.settings !== undefined ? payload.settings : currentSession.settings,
+          };
         });
       }
 

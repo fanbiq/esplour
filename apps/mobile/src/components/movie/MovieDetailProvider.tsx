@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { MovieDetailView } from "./MovieDetailView";
 
 export interface MovieDetailOptions {
@@ -18,7 +18,7 @@ interface MovieDetailContextValue {
 
 const MovieDetailContext = createContext<MovieDetailContextValue | null>(null);
 
-export function MovieDetailProvider({ children }: { children: React.ReactNode }) {
+export function MovieDetailProvider({ children }: { children: ReactNode }) {
   const [selection, setSelection] = useState<MovieSelection | null>(null);
   const closeMovie = () => setSelection(null);
   const value: MovieDetailContextValue = {
