@@ -1,0 +1,117 @@
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { eq, sql } from "drizzle-orm";
+import { db, nativeUsers, verificationTokens } from "@/db";
+import { registerSchema } from "@/lib/validations";
+import { getClientIp, isRateLimitedKey } from "@/lib/rate-limit";
+import { sendVerificationEmail } from "@/lib/email";
+import { logger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
+
+function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function otpExpiresAt(): Date {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + 15);
+  return d;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const validated = registerSchema.safeParse(body);
+
+    if (!validated.success) {
+      return NextResponse.json(
+        { message: "Invalid input", errors: validated.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
+    const { email, username, password } = validated.data;
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedUsername = username.trim().toLowerCase();
+
+    // Rate limiting: per-IP and per-email
+    const ip = getClientIp(request);
+    const ipLimit = isRateLimitedKey(`ip:${ip}`, 20, 60_000);
+    if (ipLimit.limited) {
+      return NextResponse.json({ message: "Too many requests" }, { status: 429, headers: { "Retry-After": String(ipLimit.retryAfter) } });
+    }
+
+    const emailKey = `email:${normalizedEmail}`;
+    const emailLimit = isRateLimitedKey(emailKey, 3, 60_000);
+    if (emailLimit.limited) {
+      return NextResponse.json({ message: "Too many registration attempts for this email" }, { status: 429, headers: { "Retry-After": String(emailLimit.retryAfter) } });
+    }
+
+    // Check existing email
+    const existingByEmail = await db
+      .select()
+      .from(nativeUsers)
+      .where(eq(nativeUsers.email, normalizedEmail))
+      .then((r: typeof nativeUsers.$inferSelect[]) => r[0]);
+
+    if (existingByEmail) {
+      return NextResponse.json(
+        { message: "An account with this email already exists" },
+        { status: 409 }
+      );
+    }
+
+    // Check existing username (case-insensitive)
+    const existingByUsername = await db
+      .select()
+      .from(nativeUsers)
+      .where(sql`lower(${nativeUsers.username}) = lower(${normalizedUsername})`)
+      .then((r: typeof nativeUsers.$inferSelect[]) => r[0]);
+
+    if (existingByUsername) {
+      return NextResponse.json(
+        { message: "This username is already taken" },
+        { status: 409 }
+      );
+    }
+
+    // Hash password and create user
+    const passwordHash = await bcrypt.hash(password, 12);
+    const userId = crypto.randomUUID();
+
+    await db.insert(nativeUsers).values({
+      id: userId,
+      email: normalizedEmail,
+      username: normalizedUsername,
+      passwordHash,
+      isVerified: false,
+    });
+
+    // Generate OTP
+    const otp = generateOtp();
+    const otpHash = await bcrypt.hash(otp, 10);
+
+    // Delete any previous tokens for this user
+    await db.delete(verificationTokens).where(eq(verificationTokens.userId, userId));
+
+    await db.insert(verificationTokens).values({
+      userId,
+      token: otpHash,
+      expiresAt: otpExpiresAt(),
+    });
+
+    // Send email (don't block response on failure — log it)
+    try {
+      await sendVerificationEmail(normalizedEmail, username, otp);
+    } catch (emailErr) {
+      logger.error("[Register] Failed to send verification email:", emailErr);
+      // Still return success — user can use resend
+    }
+
+    logger.info(`[Register] New user created: ${username} (${normalizedEmail})`);
+
+    return NextResponse.json({ success: true, userId, email: normalizedEmail });
+  } catch (error) {
+    return handleApiError(error, "Registration failed");
+  }
+}

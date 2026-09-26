@@ -1,0 +1,133 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getValidatedSession } from "@/lib/server/validate-session";
+import { db, nativeUsers, flicks } from "@/lib/db";
+import { eq, sql } from "drizzle-orm";
+import { z } from "zod";
+
+const updateProfileSchema = z.object({
+  displayName: z.string().min(1).max(100).optional(),
+  bio: z.string().max(500).optional(),
+  username: z
+    .string()
+    .min(3)
+    .max(30)
+    .regex(/^[a-zA-Z0-9_]+$/)
+    .optional(),
+});
+
+export async function GET(request: NextRequest) {
+  const session = await getValidatedSession();
+
+  if (!session || !session.user?.Id) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
+  try {
+    const user = await db
+      .select({
+        id: nativeUsers.id,
+        username: nativeUsers.username,
+        email: nativeUsers.email,
+        displayName: nativeUsers.displayName,
+        bio: nativeUsers.bio,
+      })
+      .from(nativeUsers)
+      .where(eq(nativeUsers.id, session.user.Id))
+      .then((rows: Array<{ id: string; username: string; email: string; displayName: string | null; bio: string | null }>) => rows[0]);
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(user);
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to fetch profile" }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  const session = await getValidatedSession();
+
+  if (!session || !session.user?.Id) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
+  try {
+    const body = await request.json();
+    const validated = updateProfileSchema.safeParse(body);
+
+    if (!validated.success) {
+      return NextResponse.json(
+        { error: "Invalid input", details: validated.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const updateData: any = {
+      updatedAt: new Date(),
+    };
+
+    if (validated.data.displayName !== undefined) {
+      updateData.displayName = validated.data.displayName;
+    }
+
+    if (validated.data.bio !== undefined) {
+      updateData.bio = validated.data.bio;
+    }
+
+    let oldUsername: string | null = null;
+    if (validated.data.username !== undefined) {
+      const normalizedUsername = validated.data.username.trim();
+      const existingUser = await db
+        .select()
+        .from(nativeUsers)
+        .where(sql`lower(${nativeUsers.username}) = lower(${normalizedUsername})`)
+        .then((rows: typeof nativeUsers.$inferSelect[]) => rows[0]);
+
+      if (existingUser && existingUser.id !== session.user.Id) {
+        return NextResponse.json({ error: "Username is already taken" }, { status: 409 });
+      }
+
+      const currentUser = await db
+        .select({ username: nativeUsers.username })
+        .from(nativeUsers)
+        .where(eq(nativeUsers.id, session.user.Id))
+        .then((rows: Array<{ username: string }>) => rows[0]);
+
+      oldUsername = currentUser?.username ?? null;
+      updateData.username = normalizedUsername;
+      session.user.Name = normalizedUsername;
+    }
+
+    await db
+      .update(nativeUsers)
+      .set(updateData)
+      .where(eq(nativeUsers.id, session.user.Id));
+
+    if (oldUsername && validated.data.username !== undefined) {
+      await db
+        .update(flicks)
+        .set({ uploader: validated.data.username.trim() })
+        .where(eq(flicks.uploader, oldUsername));
+    }
+
+    if (validated.data.username !== undefined) {
+      await session.save();
+    }
+
+    const updated = await db
+      .select({
+        id: nativeUsers.id,
+        username: nativeUsers.username,
+        displayName: nativeUsers.displayName,
+        bio: nativeUsers.bio,
+      })
+      .from(nativeUsers)
+      .where(eq(nativeUsers.id, session.user.Id))
+      .then((rows: Array<{ id: string; username: string; displayName: string | null; bio: string | null }>) => rows[0]);
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });
+  }
+}

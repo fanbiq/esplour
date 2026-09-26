@@ -1,0 +1,15 @@
+{
+  "name": "fanbiq",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "web": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "mobile": "npm run start --workspace=apps/mobile",
+    "mobile:ios": "npm run ios --workspace=apps/mobile",
+    "mobile:android": "npm run android --workspace=apps/mobile"
+  }
+}
